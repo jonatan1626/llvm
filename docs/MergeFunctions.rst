@@ -740,17 +740,17 @@ also have alias to *F*.
 
 No global aliases, replaceDirectCallers
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-If global aliases are not supported. We call ``replaceDirectCallers`` then. Just
+If global aliases are not supported. We call ``replaceDirectCallers``. Just
 go through all calls of *G* and replace it with calls of *F*. If you look into
-method you will see that it scans all uses of *G* too, and if use is callee (if
-user is call instruction and *G* is used as what to be called), we replace it
-with use of *F*.
+the method you will see that it scans all uses of *G* too, and if use is callee
+(if user is call instruction and *G* is used as what to be called), we replace
+it with use of *F*.
 
 If “F” could not be overridden, fix it!
 """""""""""""""""""""""""""""""""""""""
 
 We call ``writeThunkOrAlias(Function *F, Function *G)``. Here we try to replace
-*G* with alias to *F* first. Next conditions are essential:
+*G* with alias to *F* first. The next conditions are essential:
 
 * target should support global aliases,
 * the address itself of  *G* should be not significant, not named and not
@@ -765,7 +765,7 @@ so *G* could be replaced with this wrapper.
 As follows from *llvm* reference:
 
 “Aliases act as *second name* for the aliasee value”. So we just want to create
-second name for *F* and use it instead of *G*:
+a second name for *F* and use it instead of *G*:
 
 1. create global alias itself (*GA*),
 

@@ -797,7 +797,8 @@ it instead of *G*.
 
 Conclusion
 ==========
-We have described how to detect equal functions, and how to merge them, and
-described how it works all-together. The author hopes
-that the reader has some picture now and it helps him improve and debug ­this
-pass.
+We have described how to detect equal functions, and
+how to merge them, and described how it works
+all-together. The author hopes
+that the reader has some picture now and it helps him
+improve and debug ­this pass.

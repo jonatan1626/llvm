@@ -15,8 +15,6 @@ write the same thing twice :-)
 
 The main purpose of this pass is to recognize such functions and merge them.
 
-Why would I want to read this document?
----------------------------------------
 This document is the extension to pass comments and describes the pass logic. It
 describes the algorithm that is used in order to compare functions and
 explains how we could combine equal functions correctly to keep the module
@@ -797,11 +795,9 @@ it instead of *G*.
 
 3. Get rid of *G*.
 
-That's it.
+Conclusion
 ==========
-We have described how to detect equal functions, and how to merge them, and in
-the first chapter we have described how it works all-together. The author hopes
+We have described how to detect equal functions, and how to merge them, and
+described how it works all-together. The author hopes
 that the reader has some picture now and it helps him improve and debug ­this
 pass.
-
-The reader is welcome to send us any questions and proposals ;-)

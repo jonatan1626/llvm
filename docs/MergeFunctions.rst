@@ -66,19 +66,6 @@ article as a reference and start point here:
 What else? Well perhaps the reader should also have some experience in LLVM pass
 debugging and bug-fixing.
 
-What do I gain by reading this document?
--------------------------------------
-The main purpose is to provide the reader with a comfortable form of algorithms
-description, namely the human reading text. Since it could be hard to
-understand the algorithms straight from the source code: there are some
-principles that have to be explained first that pass uses.
-
-The author wishes to avoid the case, when you read code from top to bottom
-again and again, and yet don't understand why we implemented it that way.
-
-We hope that after this article, the reader can easily debug and improve
-MergeFunctions pass and help the LLVM project.
-
 Narrative structure
 -------------------
 The article consists of three parts. The first part explains pass functionality
@@ -795,10 +782,10 @@ it instead of *G*.
 
 3. Get rid of *G*.
 
-Conclusion
 ==========
 We have described how to detect equal functions, and
 how to merge them, and described how it works
 all-together. The author hopes
 that the reader has some picture now and it helps him
 improve and debug ­this pass.
+=======

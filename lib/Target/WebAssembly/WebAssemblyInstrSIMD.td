@@ -85,6 +85,8 @@ def splat16 : PatFrag<(ops node:$x), (build_vector
                         node:$x, node:$x, node:$x, node:$x)>;
 multiclass Splat<ValueType vec_t, string vec, WebAssemblyRegClass reg_t,
                  PatFrag splat_pat, bits<32> simdop> {
+  // Prefer splats over v128.const for const splats (65 is lowest that works)
+  let AddedComplexity = 65 in
   defm SPLAT_#vec_t : SIMD_I<(outs V128:$dst), (ins reg_t:$x), (outs), (ins),
                              [(set (vec_t V128:$dst), (splat_pat reg_t:$x))],
                              vec#".splat\t$dst, $x", vec#".splat", simdop>;
@@ -115,6 +117,18 @@ multiclass SIMDBitwise<SDNode node, string name, bits<32> simdop> {
   defm "" : SIMDBinary<v8i16, "v128", node, name, simdop>;
   defm "" : SIMDBinary<v4i32, "v128", node, name, simdop>;
   defm "" : SIMDBinary<v2i64, "v128", node, name, simdop>;
+}
+multiclass SIMDNot<ValueType vec_t, PatFrag splat_pat, ValueType lane_t> {
+  defm NOT_#vec_t : SIMD_I<(outs V128:$dst), (ins V128:$vec),
+                           (outs), (ins),
+                           [(set
+                             (vec_t V128:$dst),
+                             (vec_t (xor
+                               (vec_t V128:$vec),
+                               (vec_t (splat_pat (lane_t -1)))
+                             ))
+                           )],
+                           "v128.not\t$dst, $vec", "v128.not", 62>;
 }
 
 let Defs = [ARGUMENTS] in {
@@ -200,6 +214,11 @@ defm AND : SIMDBitwise<and, "and", 59>;
 defm OR : SIMDBitwise<or, "or", 60>;
 defm XOR : SIMDBitwise<xor, "xor", 61>;
 } // isCommutable = 1
+
+defm "" : SIMDNot<v16i8, splat16, i32>;
+defm "" : SIMDNot<v8i16, splat8, i32>;
+defm "" : SIMDNot<v4i32, splat4, i32>;
+defm "" : SIMDNot<v2i64, splat2, i64>;
 
 } // Defs = [ARGUMENTS]
 

@@ -1859,8 +1859,11 @@ SDValue DAGCombiner::visitMERGE_VALUES(SDNode *N) {
   // can be tried again once they have new operands.
   AddUsersToWorklist(N);
   do {
+    // Do as a single replacement to avoid rewalking use lists.
+    SmallVector<SDValue, 8> Ops;
     for (unsigned i = 0, e = N->getNumOperands(); i != e; ++i)
-      DAG.ReplaceAllUsesOfValueWith(SDValue(N, i), N->getOperand(i));
+      Ops.push_back(N->getOperand(i));
+    DAG.ReplaceAllUsesWith(N, Ops.data());
   } while (!N->use_empty());
   deleteAndRecombine(N);
   return SDValue(N, 0);   // Return N so it doesn't get rechecked!
@@ -1874,17 +1877,7 @@ static ConstantSDNode *getAsNonOpaqueConstant(SDValue N) {
 }
 
 SDValue DAGCombiner::foldBinOpIntoSelect(SDNode *BO) {
-  auto BinOpcode = BO->getOpcode();
-  assert((BinOpcode == ISD::ADD || BinOpcode == ISD::SUB ||
-          BinOpcode == ISD::MUL || BinOpcode == ISD::SDIV ||
-          BinOpcode == ISD::UDIV || BinOpcode == ISD::SREM ||
-          BinOpcode == ISD::UREM || BinOpcode == ISD::AND ||
-          BinOpcode == ISD::OR || BinOpcode == ISD::XOR ||
-          BinOpcode == ISD::SHL || BinOpcode == ISD::SRL ||
-          BinOpcode == ISD::SRA || BinOpcode == ISD::FADD ||
-          BinOpcode == ISD::FSUB || BinOpcode == ISD::FMUL ||
-          BinOpcode == ISD::FDIV || BinOpcode == ISD::FREM) &&
-         "Unexpected binary operator");
+  assert(ISD::isBinaryOp(BO) && "Unexpected binary operator");
 
   // Don't do this unless the old select is going away. We want to eliminate the
   // binary operator, not replace a binop with a select.
@@ -1914,6 +1907,7 @@ SDValue DAGCombiner::foldBinOpIntoSelect(SDNode *BO) {
   // propagate non constant operands into select. I.e.:
   // and (select Cond, 0, -1), X --> select Cond, 0, X
   // or X, (select Cond, -1, 0) --> select Cond, -1, X
+  auto BinOpcode = BO->getOpcode();
   bool CanFoldNonConst = (BinOpcode == ISD::AND || BinOpcode == ISD::OR) &&
                          (isNullConstantOrNullSplatConstant(CT) ||
                           isAllOnesConstantOrAllOnesSplatConstant(CT)) &&
@@ -7031,6 +7025,16 @@ SDValue DAGCombiner::visitCTPOP(SDNode *N) {
   return SDValue();
 }
 
+// FIXME: This should be checking for no signed zeros on individual operands, as
+// well as no nans.
+static bool isLegalToCombineMinNumMaxNum(SelectionDAG &DAG, SDValue LHS, SDValue RHS) {
+  const TargetOptions &Options = DAG.getTarget().Options;
+  EVT VT = LHS.getValueType();
+
+  return Options.NoSignedZerosFPMath && VT.isFloatingPoint() &&
+         DAG.isKnownNeverNaN(LHS) && DAG.isKnownNeverNaN(RHS);
+}
+
 /// Generate Min/Max node
 static SDValue combineMinNumMaxNum(const SDLoc &DL, EVT VT, SDValue LHS,
                                    SDValue RHS, SDValue True, SDValue False,
@@ -7039,6 +7043,7 @@ static SDValue combineMinNumMaxNum(const SDLoc &DL, EVT VT, SDValue LHS,
   if (!(LHS == True && RHS == False) && !(LHS == False && RHS == True))
     return SDValue();
 
+  EVT TransformVT = TLI.getTypeToTransformTo(*DAG.getContext(), VT);
   switch (CC) {
   case ISD::SETOLT:
   case ISD::SETOLE:
@@ -7047,7 +7052,7 @@ static SDValue combineMinNumMaxNum(const SDLoc &DL, EVT VT, SDValue LHS,
   case ISD::SETULT:
   case ISD::SETULE: {
     unsigned Opcode = (LHS == True) ? ISD::FMINNUM : ISD::FMAXNUM;
-    if (TLI.isOperationLegal(Opcode, VT))
+    if (TLI.isOperationLegalOrCustom(Opcode, TransformVT))
       return DAG.getNode(Opcode, DL, VT, LHS, RHS);
     return SDValue();
   }
@@ -7058,7 +7063,7 @@ static SDValue combineMinNumMaxNum(const SDLoc &DL, EVT VT, SDValue LHS,
   case ISD::SETUGT:
   case ISD::SETUGE: {
     unsigned Opcode = (LHS == True) ? ISD::FMAXNUM : ISD::FMINNUM;
-    if (TLI.isOperationLegal(Opcode, VT))
+    if (TLI.isOperationLegalOrCustom(Opcode, TransformVT))
       return DAG.getNode(Opcode, DL, VT, LHS, RHS);
     return SDValue();
   }
@@ -7291,12 +7296,7 @@ SDValue DAGCombiner::visitSELECT(SDNode *N) {
     // This is OK if we don't care about what happens if either operand is a
     // NaN.
     //
-
-    // FIXME: This should be checking for no signed zeros on individual
-    // operands, as well as no nans.
-    const TargetOptions &Options = DAG.getTarget().Options;
-    if (Options.NoSignedZerosFPMath && VT.isFloatingPoint() && N0.hasOneUse() &&
-        DAG.isKnownNeverNaN(N1) && DAG.isKnownNeverNaN(N2)) {
+    if (N0.hasOneUse() && isLegalToCombineMinNumMaxNum(DAG, N1, N2)) {
       ISD::CondCode CC = cast<CondCodeSDNode>(N0.getOperand(2))->get();
 
       if (SDValue FMinMax = combineMinNumMaxNum(
@@ -7769,6 +7769,20 @@ SDValue DAGCombiner::visitVSELECT(SDNode *N) {
       AddToWorklist(Shift.getNode());
       AddToWorklist(Add.getNode());
       return DAG.getNode(ISD::XOR, DL, VT, Add, Shift);
+    }
+
+    // vselect x, y (fcmp lt x, y) -> fminnum x, y
+    // vselect x, y (fcmp gt x, y) -> fmaxnum x, y
+    //
+    // This is OK if we don't care about what happens if either operand is a
+    // NaN.
+    //
+    EVT VT = N->getValueType(0);
+    if (N0.hasOneUse() && isLegalToCombineMinNumMaxNum(DAG, N0.getOperand(0), N0.getOperand(1))) {
+      ISD::CondCode CC = cast<CondCodeSDNode>(N0.getOperand(2))->get();
+      if (SDValue FMinMax = combineMinNumMaxNum(
+            DL, VT, N0.getOperand(0), N0.getOperand(1), N1, N2, CC, TLI, DAG))
+        return FMinMax;
     }
 
     // If this select has a condition (setcc) with narrower operands than the
@@ -9822,12 +9836,16 @@ SDValue DAGCombiner::visitBITCAST(SDNode *N) {
   // fold (conv (load x)) -> (load (conv*)x)
   // If the resultant load doesn't need a higher alignment than the original!
   if (ISD::isNormalLoad(N0.getNode()) && N0.hasOneUse() &&
-      // Do not change the width of a volatile load.
-      !cast<LoadSDNode>(N0)->isVolatile() &&
       // Do not remove the cast if the types differ in endian layout.
       TLI.hasBigEndianPartOrdering(N0.getValueType(), DAG.getDataLayout()) ==
           TLI.hasBigEndianPartOrdering(VT, DAG.getDataLayout()) &&
-      (!LegalOperations || TLI.isOperationLegal(ISD::LOAD, VT)) &&
+      // If the load is volatile, we only want to change the load type if the
+      // resulting load is legal. Otherwise we might increase the number of
+      // memory accesses. We don't care if the original type was legal or not
+      // as we assume software couldn't rely on the number of accesses of an
+      // illegal type.
+      ((!LegalOperations && !cast<LoadSDNode>(N0)->isVolatile()) ||
+       TLI.isOperationLegal(ISD::LOAD, VT)) &&
       TLI.isLoadBitCastBeneficial(N0.getValueType(), VT)) {
     LoadSDNode *LN0 = cast<LoadSDNode>(N0);
     unsigned OrigAlign = LN0->getAlignment();
@@ -14683,8 +14701,13 @@ SDValue DAGCombiner::visitSTORE(SDNode *N) {
   if (Value.getOpcode() == ISD::BITCAST && !ST->isTruncatingStore() &&
       ST->isUnindexed()) {
     EVT SVT = Value.getOperand(0).getValueType();
+    // If the store is volatile, we only want to change the store type if the
+    // resulting store is legal. Otherwise we might increase the number of
+    // memory accesses. We don't care if the original type was legal or not
+    // as we assume software couldn't rely on the number of accesses of an
+    // illegal type.
     if (((!LegalOperations && !ST->isVolatile()) ||
-         TLI.isOperationLegalOrCustom(ISD::STORE, SVT)) &&
+         TLI.isOperationLegal(ISD::STORE, SVT)) &&
         TLI.isStoreBitCastBeneficial(Value.getValueType(), SVT)) {
       unsigned OrigAlign = ST->getAlignment();
       bool Fast = false;
@@ -15026,12 +15049,19 @@ SDValue DAGCombiner::visitINSERT_VECTOR_ELT(SDNode *N) {
       InVec == InVal.getOperand(0) && EltNo == InVal.getOperand(1))
     return InVec;
 
-  // We must know which element is being inserted for folds below here.
   auto *IndexC = dyn_cast<ConstantSDNode>(EltNo);
-  if (!IndexC)
+  if (!IndexC) {
+    // If this is variable insert to undef vector, it might be better to splat:
+    // inselt undef, InVal, EltNo --> build_vector < InVal, InVal, ... >
+    if (InVec.isUndef() && TLI.shouldSplatInsEltVarIndex(VT)) {
+      SmallVector<SDValue, 8> Ops(VT.getVectorNumElements(), InVal);
+      return DAG.getBuildVector(VT, DL, Ops);
+    }
     return SDValue();
-  unsigned Elt = IndexC->getZExtValue();
+  }
 
+  // We must know which element is being inserted for folds below here.
+  unsigned Elt = IndexC->getZExtValue();
   if (SDValue Shuf = combineInsertEltToShuffle(N, Elt))
     return Shuf;
 

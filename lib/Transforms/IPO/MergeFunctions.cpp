@@ -386,12 +386,35 @@ bool MergeFunctions::runOnModule(Module &M) {
     }
   }
 
+
+  for (auto I = HashedFuncs.begin(), IE = HashedFuncs.end(); I != IE; ++I) {
+    printf("Function: %s, Hashed: %x\n", I->second->getName(), I);
+  }
+
+  for (int i=0; i < HashedFuncs.size(); i++) {
+     printf("Function: %s, Hashed: %x\n", HashedFuncs[i].second->getName(), HashedFuncs[i]);
+  }
+
+  for (int i=0; i < HashedFuncs.size(); i++) {
+     printf("Function: %s, Hashed: %x\n", HashedFuncs[i].second->getName(), HashedFuncs[i].first);
+  }
+
+  // sort(HashedFuncs);
   std::stable_sort(
       HashedFuncs.begin(), HashedFuncs.end(),
       [](const std::pair<FunctionComparator::FunctionHash, Function *> &a,
          const std::pair<FunctionComparator::FunctionHash, Function *> &b) {
+            Function* tempa = a.second;
+            Function* tempb = b.second;
+            printf("Comparing %s, %s\n", tempa->getName(), tempb->getName());
+            printf("A: %llu, B: %llu\n", a.first, b.first);
         return a.first < b.first;
       });
+
+  for (auto I = HashedFuncs.begin(), IE = HashedFuncs.end(); I != IE; ++I) {
+     FunctionComparator::FunctionHash temp = I->first;
+    printf("Function: %s, Hashed: %llu\n", I->second->getName(), temp);
+  }
 
   auto S = HashedFuncs.begin();
   for (auto I = HashedFuncs.begin(), IE = HashedFuncs.end(); I != IE; ++I) {

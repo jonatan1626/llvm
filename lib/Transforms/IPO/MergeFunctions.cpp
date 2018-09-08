@@ -406,7 +406,8 @@ bool MergeFunctions::runOnModule(Module &M) {
          const std::pair<FunctionComparator::FunctionHash, Function *> &b) {
             Function* tempa = a.second;
             Function* tempb = b.second;
-            printf("Comparing %s, %s\n", tempa->getName(), tempb->getName());
+            printf("A: %s\n", tempa->getName());
+            printf("B: %s\n", tempb->getName());
             printf("A: %llu, B: %llu\n", a.first, b.first);
         return a.first < b.first;
       });
